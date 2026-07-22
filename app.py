@@ -249,6 +249,66 @@ if active_data:
     df_results['Test Plan'] = active_data["test_plan_name"]
 
     st.divider()
+
+    # -------------------------------------------------------------
+    # 1. INITIAL PRIORITY SUMMARY TABLE (Type, Scenario, Priority)
+    # -------------------------------------------------------------
+    st.subheader("📌 Scenario Priority Summary")
+    
+    # Helper to add colored priority badges
+    def format_priority(val):
+        if val == "High":
+            return "🔴 High"
+        elif val == "Medium":
+            return "🟡 Medium"
+        elif val == "Low":
+            return "🟢 Low"
+        return val
+
+    df_summary = df_results[['Type', 'Scenario', 'Priority']].copy()
+    df_summary['Priority'] = df_summary['Priority'].apply(format_priority)
+
+    st.dataframe(
+        df_summary,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Type": st.column_config.TextColumn("Type", width="small"),
+            "Scenario": st.column_config.TextColumn("Scenario", width="large"),
+            "Priority": st.column_config.TextColumn("Priority", width="small"),
+        }
+    )
+
+    # -------------------------------------------------------------
+    # 2. SELECTABLE SCENARIO DETAILED VIEW
+    # -------------------------------------------------------------
+    st.divider()
+    st.subheader("🔍 Scenario Detail Inspector")
+    
+    selected_scenario_name = st.selectbox(
+        "Select a test scenario to inspect full details:",
+        options=df_results['Scenario'].tolist()
+    )
+
+    if selected_scenario_name:
+        selected_row = df_results[df_results['Scenario'] == selected_scenario_name].iloc[0]
+        
+        col_a, col_b, col_c = st.columns(3)
+        with col_a:
+            st.write(f"**Type:** {selected_row['Type']}")
+        with col_b:
+            st.write(f"**Priority:** {format_priority(selected_row['Priority'])}")
+        with col_c:
+            st.write(f"**Test Plan:** {selected_row['Test Plan']}")
+            
+        st.write(f"**Scenario:** {selected_row['Scenario']}")
+        st.info(f"**Steps:**\n{selected_row['Steps']}")
+        st.success(f"**Expected Result:**\n{selected_row['Expected Result']}")
+
+    # -------------------------------------------------------------
+    # 3. COMPLETE TEST SUITE TABBED MATRIX
+    # -------------------------------------------------------------
+    st.divider()
     st.subheader(f"Generated Test Scenarios & Cases ({len(df_results)} Total)")
 
     # Filter Tabs for better UX
