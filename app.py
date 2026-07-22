@@ -275,12 +275,17 @@ if active_data:
     st.metric("Base Requirement Classification", active_data["predicted_priority"])
 
     df_results = pd.DataFrame(active_data["scenarios"])
+    
+    # Safe Fallback to guarantee 'Priority' column exists even for older cached JSON
+    if 'Priority' not in df_results.columns:
+        df_results['Priority'] = active_data.get("predicted_priority", "Medium")
+
     df_results['Test Plan'] = active_data["test_plan_name"]
 
     st.divider()
 
     # -------------------------------------------------------------
-    # 1. SCENARIO PRIORITY SUMMARY (Dynamic High / Medium / Low)
+    # 1. SCENARIO PRIORITY SUMMARY (Guarded against KeyError)
     # -------------------------------------------------------------
     st.subheader("📌 Scenario Priority Summary")
     
@@ -371,6 +376,8 @@ if st.session_state.authenticated:
             with st.expander(f"📁 {task['project_name']} — {task['test_plan_name']} (Base Priority: {task['predicted_priority']})"):
                 st.write(f"**User Story:** {task['user_story']}")
                 df_hist = pd.DataFrame(task['scenarios'])
+                if 'Priority' not in df_hist.columns:
+                    df_hist['Priority'] = task.get("predicted_priority", "Medium")
                 df_hist['Test Plan'] = task['test_plan_name']
                 st.dataframe(df_hist, use_container_width=True)
     else:
