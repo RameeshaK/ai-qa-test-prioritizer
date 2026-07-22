@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import joblib
 import re
+import json
+import os
 
 # Page Configuration
 st.set_page_config(
@@ -9,6 +11,44 @@ st.set_page_config(
     page_icon="🧪",
     layout="wide"
 )
+
+# -------------------------------------------------------------
+# USER AUTHENTICATION & PERSISTENCE SETUP
+# -------------------------------------------------------------
+USER_DB = {
+    "qa_lead": "password123",
+    "tester1": "qa2026"
+}
+
+USER_HISTORY_FILE = "user_history.json"
+
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+if "username" not in st.session_state:
+    st.session_state.username = None
+if "guest_results" not in st.session_state:
+    st.session_state.guest_results = None
+
+def load_all_history():
+    if os.path.exists(USER_HISTORY_FILE):
+        try:
+            with open(USER_HISTORY_FILE, "r") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+def save_user_task(username, task_data):
+    history = load_all_history()
+    if username not in history:
+        history[username] = []
+    history[username].append(task_data)
+    with open(USER_HISTORY_FILE, "w") as f:
+        json.dump(history, f, indent=4)
+
+def get_user_tasks(username):
+    history = load_all_history()
+    return history.get(username, [])
 
 # Load Serialized Models
 @st.cache_resource
@@ -121,18 +161,46 @@ def generate_all_scenarios(user_story):
 
     return scenarios
 
+# --- SIDEBAR AUTHENTICATION ---
+st.sidebar.title("🔐 User Authentication")
+
+if not st.session_state.authenticated:
+    st.sidebar.subheader("QA Engineer Login")
+    login_user = st.sidebar.text_input("Username", value="", placeholder="e.g., qa_lead")
+    login_pass = st.sidebar.text_input("Password", type="password", value="", placeholder="••••••••")
+    
+    if st.sidebar.button("Login", type="primary"):
+        if login_user in USER_DB and USER_DB[login_user] == login_pass:
+            st.session_state.authenticated = True
+            st.session_state.username = login_user
+            st.session_state.guest_results = None
+            st.sidebar.success(f"Logged in as {login_user}")
+            st.rerun()
+        else:
+            st.sidebar.error("Invalid Username or Password")
+            
+    st.sidebar.info("💡 **Guest Mode:** Generating without login will clear test cases on page reload.")
+else:
+    st.sidebar.success(f"Logged in as: **{st.session_state.username}**")
+    if st.sidebar.button("Logout"):
+        st.session_state.authenticated = False
+        st.session_state.username = None
+        st.session_state.guest_results = None
+        st.rerun()
+
 # --- UI LAYOUT ---
 st.title("🧪 AI Test Case Generation & Prioritization System")
 
 col1, col2 = st.columns(2)
 with col1:
-    project_name = st.text_input("Project Name", value="E-Commerce API")
+    project_name = st.text_input("Project Name", value="", placeholder="e.g., E-Commerce API")
 with col2:
-    test_plan_name = st.text_input("Test Plan Name", value="Sprint 1 Regression")
+    test_plan_name = st.text_input("Test Plan Name", value="", placeholder="e.g., Sprint 1 Regression")
 
 user_story_input = st.text_area(
     "Enter Raw User Story:",
-    value="user should be able to login to home using login interface",
+    value="",
+    placeholder="e.g., user should be able to login to home using login interface",
     height=100
 )
 
@@ -142,39 +210,82 @@ if st.button("Generate Test Plan", type="primary"):
         vec_input = vectorizer.transform([user_story_input]).toarray()
         predicted_priority = model.predict(vec_input)[0]
 
-        # Display Metrics
-        st.subheader("Results")
-        st.metric("Predicted Priority", predicted_priority)
-        st.success("Complete test suite generated and prioritized!")
-
         # Generate All Scenarios
         scenarios = generate_all_scenarios(user_story_input)
-        df_results = pd.DataFrame(scenarios)
-        df_results['Priority'] = predicted_priority
-        df_results['Test Plan'] = test_plan_name
-
-        st.divider()
-        st.subheader(f"Generated Test Scenarios & Cases ({len(df_results)} Total)")
-
-        # Filter Tabs for better UX
-        tab_all, tab_pos, tab_neg, tab_edge = st.tabs(["All Cases", "Positive", "Negative", "Edge Cases"])
         
-        with tab_all:
-            st.dataframe(df_results, use_container_width=True)
-        with tab_pos:
-            st.dataframe(df_results[df_results['Type'] == 'Positive'], use_container_width=True)
-        with tab_neg:
-            st.dataframe(df_results[df_results['Type'] == 'Negative'], use_container_width=True)
-        with tab_edge:
-            st.dataframe(df_results[df_results['Type'] == 'Edge Case'], use_container_width=True)
+        task_data = {
+            "project_name": project_name or "E-Commerce API",
+            "test_plan_name": test_plan_name or "Sprint 1 Regression",
+            "user_story": user_story_input,
+            "predicted_priority": predicted_priority,
+            "scenarios": scenarios
+        }
 
-        # Export Option
-        csv_data = df_results.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="📥 Download Complete Test Suite (CSV)",
-            data=csv_data,
-            file_name=f"{project_name}_full_test_suite.csv",
-            mime="text/csv"
-        )
+        if st.session_state.authenticated:
+            save_user_task(st.session_state.username, task_data)
+            st.success("✅ Complete test suite generated and saved to your account!")
+        else:
+            st.session_state.guest_results = task_data
+            st.info("ℹ️ Generated in Guest Mode. Reloading the page will clear these results.")
     else:
         st.warning("Please enter a valid user story.")
+
+# Render Current Task Output
+active_data = None
+
+if st.session_state.authenticated:
+    user_tasks = get_user_tasks(st.session_state.username)
+    if user_tasks:
+        active_data = user_tasks[-1]
+else:
+    active_data = st.session_state.guest_results
+
+if active_data:
+    st.subheader("Results")
+    st.metric("Predicted Priority", active_data["predicted_priority"])
+
+    df_results = pd.DataFrame(active_data["scenarios"])
+    df_results['Priority'] = active_data["predicted_priority"]
+    df_results['Test Plan'] = active_data["test_plan_name"]
+
+    st.divider()
+    st.subheader(f"Generated Test Scenarios & Cases ({len(df_results)} Total)")
+
+    # Filter Tabs for better UX
+    tab_all, tab_pos, tab_neg, tab_edge = st.tabs(["All Cases", "Positive", "Negative", "Edge Cases"])
+    
+    with tab_all:
+        st.dataframe(df_results, use_container_width=True)
+    with tab_pos:
+        st.dataframe(df_results[df_results['Type'] == 'Positive'], use_container_width=True)
+    with tab_neg:
+        st.dataframe(df_results[df_results['Type'] == 'Negative'], use_container_width=True)
+    with tab_edge:
+        st.dataframe(df_results[df_results['Type'] == 'Edge Case'], use_container_width=True)
+
+    # Export Option
+    csv_data = df_results.to_csv(index=False).encode('utf-8')
+    st.download_button(
+        label="📥 Download Complete Test Suite (CSV)",
+        data=csv_data,
+        file_name=f"{active_data['project_name']}_full_test_suite.csv",
+        mime="text/csv"
+    )
+
+# --- HISTORICAL TASKS FOR LOGGED-IN USERS ---
+if st.session_state.authenticated:
+    st.divider()
+    st.subheader("📚 Saved Task History")
+    
+    saved_tasks = get_user_tasks(st.session_state.username)
+    
+    if saved_tasks:
+        for idx, task in enumerate(reversed(saved_tasks)):
+            with st.expander(f"📁 {task['project_name']} — {task['test_plan_name']} (Priority: {task['predicted_priority']})"):
+                st.write(f"**User Story:** {task['user_story']}")
+                df_hist = pd.DataFrame(task['scenarios'])
+                df_hist['Priority'] = task['predicted_priority']
+                df_hist['Test Plan'] = task['test_plan_name']
+                st.dataframe(df_hist, use_container_width=True)
+    else:
+        st.info("No saved tasks found. Generate a test plan above to save it to your history.")
