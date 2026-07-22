@@ -62,8 +62,42 @@ try:
 except Exception as e:
     st.error(f"Error loading model files: {e}")
 
+# -------------------------------------------------------------
+# SCENARIO-LEVEL DYNAMIC PRIORITIZATION LOGIC
+# -------------------------------------------------------------
+def prioritize_scenario(scenario_type, scenario_title, overall_story_priority):
+    """
+    Dynamically assigns High, Medium, or Low priority to each scenario
+    based on scenario risk type + overall story priority.
+    """
+    title_lower = scenario_title.lower()
+    
+    # 1. High Priority Rules (Security, Auth, RBAC, Core Functional Flow)
+    if "rbac" in title_lower or "unauthorized" in title_lower or "expired or invalid session" in title_lower:
+        return "High"
+    if scenario_type == "Positive" and "successful execution" in title_lower:
+        return "High" if overall_story_priority in ["High", "Medium"] else "Medium"
+    
+    # 2. UI / Styling / Cosmetic Rules -> Low Priority
+    if "ui layout" in title_lower or "cosmetic" in title_lower or "navigation" in title_lower:
+        return "Low"
+    
+    # 3. Negative / Validation Rules
+    if scenario_type == "Negative":
+        if overall_story_priority == "High":
+            return "High"
+        return "Medium"
+        
+    # 4. Edge Cases Rules
+    if scenario_type == "Edge Case":
+        if "multi-click" in title_lower or "concurrently" in title_lower:
+            return "Medium" if overall_story_priority == "High" else "Low"
+        return "Low"
+
+    return overall_story_priority
+
 # Dynamic Test Case Engine (Generates All Possible Scenarios)
-def generate_all_scenarios(user_story):
+def generate_all_scenarios(user_story, overall_story_priority):
     # Extract intent/action keywords
     match = re.search(r"As a (.*?),\s*I want to (.*?)(?:\s*so that (.*))?$", user_story, re.IGNORECASE)
     if match:
@@ -73,12 +107,8 @@ def generate_all_scenarios(user_story):
         role = "User"
         action = user_story.strip()
 
-    scenarios = []
-
-    # -------------------------------------------------------------
-    # 1. POSITIVE TEST SCENARIOS (Valid Flows)
-    # -------------------------------------------------------------
-    scenarios.extend([
+    raw_scenarios = [
+        # POSITIVE
         {
             "Type": "Positive",
             "Scenario": f"Verify successful execution of {action} with valid inputs",
@@ -96,13 +126,8 @@ def generate_all_scenarios(user_story):
             "Scenario": f"Verify UI layout and navigation for {action}",
             "Steps": f"1. Navigate to {action} page\n2. Inspect field labels, alignment, and action buttons.",
             "Expected Result": "UI components display properly according to design guidelines."
-        }
-    ])
-
-    # -------------------------------------------------------------
-    # 2. NEGATIVE TEST SCENARIOS (Error Handling & Input Validation)
-    # -------------------------------------------------------------
-    scenarios.extend([
+        },
+        # NEGATIVE
         {
             "Type": "Negative",
             "Scenario": f"Attempt {action} with all mandatory fields blank",
@@ -126,13 +151,8 @@ def generate_all_scenarios(user_story):
             "Scenario": f"Unauthorized execution of {action} (RBAC Check)",
             "Steps": f"1. Log in with an unprivileged role\n2. Attempt to trigger {action} directly via URL or API.",
             "Expected Result": "Access denied with HTTP 403 Forbidden status."
-        }
-    ])
-
-    # -------------------------------------------------------------
-    # 3. EDGE & BOUNDARY SCENARIOS (Stress & Limit Verification)
-    # -------------------------------------------------------------
-    scenarios.extend([
+        },
+        # EDGE CASES
         {
             "Type": "Edge Case",
             "Scenario": f"Execute {action} with boundary limit input size (Max Length)",
@@ -157,7 +177,17 @@ def generate_all_scenarios(user_story):
             "Steps": f"1. Open {action} page in two browser tabs simultaneously\n2. Submit conflicting data from both tabs.",
             "Expected Result": "Concurrency checks prevent race conditions or data overwrite errors."
         }
-    ])
+    ]
+
+    # Assign Scenario-Specific Priorities
+    scenarios = []
+    for item in raw_scenarios:
+        item["Priority"] = prioritize_scenario(item["Type"], item["Scenario"], overall_story_priority)
+        scenarios.append(item)
+
+    # Sort so High Priority scenarios always appear first
+    priority_order = {"High": 1, "Medium": 2, "Low": 3}
+    scenarios.sort(key=lambda x: priority_order.get(x["Priority"], 2))
 
     return scenarios
 
@@ -206,12 +236,12 @@ user_story_input = st.text_area(
 
 if st.button("Generate Test Plan", type="primary"):
     if user_story_input.strip():
-        # Predict Priority using Trained Model
+        # Predict Base Priority using Model
         vec_input = vectorizer.transform([user_story_input]).toarray()
         predicted_priority = model.predict(vec_input)[0]
 
-        # Generate All Scenarios
-        scenarios = generate_all_scenarios(user_story_input)
+        # Generate Scenarios with Individual Dynamic Priorities
+        scenarios = generate_all_scenarios(user_story_input, predicted_priority)
         
         task_data = {
             "project_name": project_name or "E-Commerce API",
@@ -223,7 +253,7 @@ if st.button("Generate Test Plan", type="primary"):
 
         if st.session_state.authenticated:
             save_user_task(st.session_state.username, task_data)
-            st.success("✅ Complete test suite generated and saved to your account!")
+            st.success("✅ Complete test suite generated and prioritized!")
         else:
             st.session_state.guest_results = task_data
             st.info("ℹ️ Generated in Guest Mode. Reloading the page will clear these results.")
@@ -242,20 +272,18 @@ else:
 
 if active_data:
     st.subheader("Results")
-    st.metric("Predicted Priority", active_data["predicted_priority"])
+    st.metric("Base Requirement Classification", active_data["predicted_priority"])
 
     df_results = pd.DataFrame(active_data["scenarios"])
-    df_results['Priority'] = active_data["predicted_priority"]
     df_results['Test Plan'] = active_data["test_plan_name"]
 
     st.divider()
 
     # -------------------------------------------------------------
-    # 1. INITIAL PRIORITY SUMMARY TABLE (Type, Scenario, Priority)
+    # 1. SCENARIO PRIORITY SUMMARY (Dynamic High / Medium / Low)
     # -------------------------------------------------------------
     st.subheader("📌 Scenario Priority Summary")
     
-    # Helper to add colored priority badges
     def format_priority(val):
         if val == "High":
             return "🔴 High"
@@ -266,16 +294,16 @@ if active_data:
         return val
 
     df_summary = df_results[['Type', 'Scenario', 'Priority']].copy()
-    df_summary['Priority'] = df_summary['Priority'].apply(format_priority)
+    df_summary['Priority Badge'] = df_summary['Priority'].apply(format_priority)
 
     st.dataframe(
-        df_summary,
+        df_summary[['Type', 'Scenario', 'Priority Badge']],
         use_container_width=True,
         hide_index=True,
         column_config={
             "Type": st.column_config.TextColumn("Type", width="small"),
             "Scenario": st.column_config.TextColumn("Scenario", width="large"),
-            "Priority": st.column_config.TextColumn("Priority", width="small"),
+            "Priority Badge": st.column_config.TextColumn("Priority", width="small"),
         }
     )
 
@@ -311,7 +339,6 @@ if active_data:
     st.divider()
     st.subheader(f"Generated Test Scenarios & Cases ({len(df_results)} Total)")
 
-    # Filter Tabs for better UX
     tab_all, tab_pos, tab_neg, tab_edge = st.tabs(["All Cases", "Positive", "Negative", "Edge Cases"])
     
     with tab_all:
@@ -341,10 +368,9 @@ if st.session_state.authenticated:
     
     if saved_tasks:
         for idx, task in enumerate(reversed(saved_tasks)):
-            with st.expander(f"📁 {task['project_name']} — {task['test_plan_name']} (Priority: {task['predicted_priority']})"):
+            with st.expander(f"📁 {task['project_name']} — {task['test_plan_name']} (Base Priority: {task['predicted_priority']})"):
                 st.write(f"**User Story:** {task['user_story']}")
                 df_hist = pd.DataFrame(task['scenarios'])
-                df_hist['Priority'] = task['predicted_priority']
                 df_hist['Test Plan'] = task['test_plan_name']
                 st.dataframe(df_hist, use_container_width=True)
     else:
