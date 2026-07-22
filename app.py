@@ -1,113 +1,180 @@
+import streamlit as st
 import pandas as pd
-import numpy as np
-import random
 import joblib
-from sklearn.model_selection import train_test_split
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
-import seaborn as sns
-import matplotlib.pyplot as plt
+import re
 
-# -------------------------------------------------------------
-# 1. GENERATE 2,100 BALANCED USER STORIES DATASET
-# -------------------------------------------------------------
-roles = [
-    "user", "administrator", "customer", "support manager", "guest", 
-    "vendor", "system admin", "billing coordinator", "security auditor"
-]
-
-# HIGH PRIORITY ACTIONS (Security, Auth, Payments, Data Loss)
-high_actions = [
-    "process credit card payments securely via payment gateway",
-    "reset forgotten password using multi-factor authentication SMS code",
-    "revoke user permissions and restrict access to admin panel",
-    "encrypt sensitive personal health and financial billing records",
-    "process high-value online bank transfer transactions",
-    "authenticate using OAuth2 single sign-on token",
-    "delete user account and permanently erase associated PII data",
-    "update credit card tokenization and security CVV verification",
-    "audit security logs and flag suspicious IP login attempts",
-    "authorize API keys for external service integrations"
-]
-
-# MEDIUM PRIORITY ACTIONS (Core Features, Functional Logic, Search, Filters)
-medium_actions = [
-    "filter search results by category, rating, and price range",
-    "update profile avatar picture and personal account biography",
-    "receive automated email notifications upon order dispatch",
-    "export user transaction logs to downloadable CSV and PDF files",
-    "add multiple items to shopping cart and calculate tax",
-    "view past order history and download invoice receipts",
-    "save favorite search queries to personal dashboard",
-    "post comments and star ratings on product review pages",
-    "schedule automated daily data backup reports",
-    "apply promotional discount coupon codes during checkout"
-]
-
-# LOW PRIORITY ACTIONS (UI/UX, Styling, Formatting, Alignment)
-low_actions = [
-    "align footer copyright text in the horizontal center",
-    "change submit button hover color to navy blue",
-    "display company logo at top left corner of navbar",
-    "show tooltip popups when hovering over dashboard icons",
-    "adjust font size and line spacing on privacy policy terms",
-    "toggle dark mode appearance theme on settings page",
-    "reorder table columns on administrative grid view",
-    "add subtle fade animation effect when opening modal windows",
-    "update copyright year text in footer section",
-    "customize background color scheme of side navigation drawer"
-]
-
-dataset = []
-
-# Generate exactly 700 samples per class = 2,100 total balanced samples
-random.seed(42)
-for _ in range(700):
-    role = random.choice(roles)
-    dataset.append({"user_story": f"As a {role}, I want to {random.choice(high_actions)}.", "priority": "High"})
-    dataset.append({"user_story": f"As a {role}, I want to {random.choice(medium_actions)}.", "priority": "Medium"})
-    dataset.append({"user_story": f"As a {role}, I want to {random.choice(low_actions)}.", "priority": "Low"})
-
-df = pd.DataFrame(dataset)
-df = df.sample(frac=1, random_state=42).reset_index(drop=True)  # Shuffle data
-
-print(f"✅ Dataset Successfully Generated: {len(df)} Total Requirements!")
-print("\nClass Distribution:")
-print(df['priority'].value_counts())
-
-# -------------------------------------------------------------
-# 2. TRAIN HIGH-ACCURACY CLASSIFIER
-# -------------------------------------------------------------
-X_train_text, X_test_text, y_train, y_test = train_test_split(
-    df['user_story'], df['priority'], test_size=0.2, random_state=42, stratify=df['priority']
+# Page Configuration
+st.set_page_config(
+    page_title="AI Test Case Generation & Prioritization System",
+    page_icon="🧪",
+    layout="wide"
 )
 
-# TF-IDF Feature Extraction
-vectorizer = TfidfVectorizer(ngram_range=(1, 2), min_df=1, sublinear_tf=True)
-X_train = vectorizer.fit_transform(X_train_text).toarray()
-X_test = vectorizer.transform(X_test_text).toarray()
+# Load Serialized Models
+@st.cache_resource
+def load_ml_assets():
+    model = joblib.load('priority_model.pkl')
+    vectorizer = joblib.load('tfidf_vectorizer.pkl')
+    return model, vectorizer
 
-# Model Initialization
-model = RandomForestClassifier(n_estimators=200, random_state=42)
-model.fit(X_train, y_train)
+try:
+    model, vectorizer = load_ml_assets()
+except Exception as e:
+    st.error(f"Error loading model files: {e}")
 
-# -------------------------------------------------------------
-# 3. EVALUATE MODEL ACCURACY
-# -------------------------------------------------------------
-y_pred = model.predict(X_test)
+# Dynamic Test Case Engine (Generates All Possible Scenarios)
+def generate_all_scenarios(user_story):
+    # Extract intent/action keywords
+    match = re.search(r"As a (.*?),\s*I want to (.*?)(?:\s*so that (.*))?$", user_story, re.IGNORECASE)
+    if match:
+        role = match.group(1).strip()
+        action = match.group(2).strip()
+    else:
+        role = "User"
+        action = user_story.strip()
 
-acc = accuracy_score(y_test, y_pred)
-print("\n==========================================")
-print(f"🚀 Final Model Accuracy: {acc * 100:.2f}%")
-print("==========================================\n")
+    scenarios = []
 
-print("Classification Report:")
-print(classification_report(y_test, y_pred))
+    # -------------------------------------------------------------
+    # 1. POSITIVE TEST SCENARIOS (Valid Flows)
+    # -------------------------------------------------------------
+    scenarios.extend([
+        {
+            "Type": "Positive",
+            "Scenario": f"Verify successful execution of {action} with valid inputs",
+            "Steps": f"1. Log in as {role}\n2. Enter valid required data for {action}\n3. Submit request.",
+            "Expected Result": "System processes request successfully and returns confirmation."
+        },
+        {
+            "Type": "Positive",
+            "Scenario": f"Verify {action} with optional fields populated",
+            "Steps": f"1. Access {action} interface\n2. Fill mandatory AND optional fields with valid data\n3. Click Submit.",
+            "Expected Result": "System accepts all data fields correctly without truncation."
+        },
+        {
+            "Type": "Positive",
+            "Scenario": f"Verify UI layout and navigation for {action}",
+            "Steps": f"1. Navigate to {action} page\n2. Inspect field labels, alignment, and action buttons.",
+            "Expected Result": "UI components display properly according to design guidelines."
+        }
+    ])
 
-# -------------------------------------------------------------
-# 4. EXPORT MODEL ARTIFACTS FOR STREAMLIT
-# -------------------------------------------------------------
-joblib.dump(model, 'priority_model.pkl')
-joblib.dump(vectorizer, 'tfidf_vectorizer.pkl')
-print("\n✅ Saved 'priority_model.pkl' & 'tfidf_vectorizer.pkl' ready for download!")
+    # -------------------------------------------------------------
+    # 2. NEGATIVE TEST SCENARIOS (Error Handling & Input Validation)
+    # -------------------------------------------------------------
+    scenarios.extend([
+        {
+            "Type": "Negative",
+            "Scenario": f"Attempt {action} with all mandatory fields blank",
+            "Steps": f"1. Navigate to {action} interface\n2. Leave required fields empty\n3. Click Submit.",
+            "Expected Result": "Form submission is blocked; inline validation messages appear."
+        },
+        {
+            "Type": "Negative",
+            "Scenario": f"Attempt {action} with invalid input format / special characters",
+            "Steps": f"1. Enter unexpected characters (e.g., <script>, sql injection strings) into {action} fields\n2. Submit.",
+            "Expected Result": "Input sanitization triggers; system throws error without crashing."
+        },
+        {
+            "Type": "Negative",
+            "Scenario": f"Attempt {action} with expired or invalid session token",
+            "Steps": f"1. Open {action} interface\n2. Clear session cookies / let session expire\n3. Click Submit.",
+            "Expected Result": "System redirects to Login screen with 'Session Expired' notification."
+        },
+        {
+            "Type": "Negative",
+            "Scenario": f"Unauthorized execution of {action} (RBAC Check)",
+            "Steps": f"1. Log in with an unprivileged role\n2. Attempt to trigger {action} directly via URL or API.",
+            "Expected Result": "Access denied with HTTP 403 Forbidden status."
+        }
+    ])
+
+    # -------------------------------------------------------------
+    # 3. EDGE & BOUNDARY SCENARIOS (Stress & Limit Verification)
+    # -------------------------------------------------------------
+    scenarios.extend([
+        {
+            "Type": "Edge Case",
+            "Scenario": f"Execute {action} with boundary limit input size (Max Length)",
+            "Steps": f"1. Enter maximum allowed string length (e.g., 255+ chars) into {action} input fields\n2. Submit.",
+            "Expected Result": "System truncates or validates input within character limits safely."
+        },
+        {
+            "Type": "Edge Case",
+            "Scenario": f"Execute {action} during sudden network disconnect / high latency",
+            "Steps": f"1. Initiate {action}\n2. Simulate network disconnect before server responds.",
+            "Expected Result": "System handles timeout gracefully without duplicating records or corrupting database."
+        },
+        {
+            "Type": "Edge Case",
+            "Scenario": f"Rapid multi-click / double submission during {action}",
+            "Steps": f"1. Enter valid inputs for {action}\n2. Click the Submit button rapidly multiple times.",
+            "Expected Result": "Submit button disables on first click; request is processed only once."
+        },
+        {
+            "Type": "Edge Case",
+            "Scenario": f"Execute {action} concurrently across multiple tabs",
+            "Steps": f"1. Open {action} page in two browser tabs simultaneously\n2. Submit conflicting data from both tabs.",
+            "Expected Result": "Concurrency checks prevent race conditions or data overwrite errors."
+        }
+    ])
+
+    return scenarios
+
+# --- UI LAYOUT ---
+st.title("🧪 AI Test Case Generation & Prioritization System")
+
+col1, col2 = st.columns(2)
+with col1:
+    project_name = st.text_input("Project Name", value="E-Commerce API")
+with col2:
+    test_plan_name = st.text_input("Test Plan Name", value="Sprint 1 Regression")
+
+user_story_input = st.text_area(
+    "Enter Raw User Story:",
+    value="user should be able to login to home using login interface",
+    height=100
+)
+
+if st.button("Generate Test Plan", type="primary"):
+    if user_story_input.strip():
+        # Predict Priority using Trained Model
+        vec_input = vectorizer.transform([user_story_input]).toarray()
+        predicted_priority = model.predict(vec_input)[0]
+
+        # Display Metrics
+        st.subheader("Results")
+        st.metric("Predicted Priority", predicted_priority)
+        st.success("Complete test suite generated and prioritized!")
+
+        # Generate All Scenarios
+        scenarios = generate_all_scenarios(user_story_input)
+        df_results = pd.DataFrame(scenarios)
+        df_results['Priority'] = predicted_priority
+        df_results['Test Plan'] = test_plan_name
+
+        st.divider()
+        st.subheader(f"Generated Test Scenarios & Cases ({len(df_results)} Total)")
+
+        # Filter Tabs for better UX
+        tab_all, tab_pos, tab_neg, tab_edge = st.tabs(["All Cases", "Positive", "Negative", "Edge Cases"])
+        
+        with tab_all:
+            st.dataframe(df_results, use_container_width=True)
+        with tab_pos:
+            st.dataframe(df_results[df_results['Type'] == 'Positive'], use_container_width=True)
+        with tab_neg:
+            st.dataframe(df_results[df_results['Type'] == 'Negative'], use_container_width=True)
+        with tab_edge:
+            st.dataframe(df_results[df_results['Type'] == 'Edge Case'], use_container_width=True)
+
+        # Export Option
+        csv_data = df_results.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📥 Download Complete Test Suite (CSV)",
+            data=csv_data,
+            file_name=f"{project_name}_full_test_suite.csv",
+            mime="text/csv"
+        )
+    else:
+        st.warning("Please enter a valid user story.")
