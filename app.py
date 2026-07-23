@@ -12,11 +12,11 @@ st.set_page_config(
     layout="wide"
 )
 
-# -------------------------------------------------------------
-# USER AUTHENTICATION & PERSISTENCE SETUP
-# -------------------------------------------------------------
+# =============================================================
+# PART 1: AUTHENTICATION, PERSISTENCE & ASSETS (Your snippet)
+# =============================================================
 USER_DB = {
-    "qa_lead": "password123",
+    "qalead": "lead2026",
     "tester1": "qa2026"
 }
 
@@ -28,6 +28,13 @@ if "username" not in st.session_state:
     st.session_state.username = None
 if "guest_results" not in st.session_state:
     st.session_state.guest_results = None
+
+if "project_name_input" not in st.session_state:
+    st.session_state.project_name_input = ""
+if "test_plan_name_input" not in st.session_state:
+    st.session_state.test_plan_name_input = ""
+if "user_story_input" not in st.session_state:
+    st.session_state.user_story_input = ""
 
 def load_all_history():
     if os.path.exists(USER_HISTORY_FILE):
@@ -62,6 +69,104 @@ try:
 except Exception as e:
     st.error(f"Error loading model files: {e}")
 
+
+# =============================================================
+# ADD PART 2 RIGHT HERE: SCENARIO & PRIORITIZATION ENGINE
+# =============================================================
+def prioritize_scenario(scenario_type, scenario_title, overall_story_priority):
+    title_lower = scenario_title.lower()
+    
+    # High Priority Rules
+    if "rbac" in title_lower or "unauthorized" in title_lower or "expired or invalid session" in title_lower:
+        return "High"
+    if scenario_type == "Positive" and "successful execution" in title_lower:
+        return "High" if overall_story_priority in ["High", "Medium"] else "Medium"
+    
+    # Low Priority Rules
+    if "ui layout" in title_lower or "cosmetic" in title_lower or "navigation" in title_lower:
+        return "Low"
+    
+    # Negative Rules
+    if scenario_type == "Negative":
+        return "High" if overall_story_priority == "High" else "Medium"
+        
+    # Edge Cases Rules
+    if scenario_type == "Edge Case":
+        if "multi-click" in title_lower or "concurrently" in title_lower:
+            return "Medium" if overall_story_priority == "High" else "Low"
+        return "Low"
+
+    return overall_story_priority
+
+
+def generate_all_scenarios(user_story, overall_story_priority):
+    match = re.search(r"As a (.*?),\s*I want to (.*?)(?:\s*so that (.*))?$", user_story, re.IGNORECASE)
+    if match:
+        role = match.group(1).strip()
+        action = match.group(2).strip()
+    else:
+        role = "User"
+        action = user_story.strip()
+
+    raw_scenarios = [
+        {"Type": "Positive", "Scenario": f"Verify successful execution of {action} with valid inputs", "Steps": f"1. Log in as {role}\n2. Enter valid required data for {action}\n3. Submit request.", "Expected Result": "System processes request successfully and returns confirmation."},
+        {"Type": "Positive", "Scenario": f"Verify {action} with optional fields populated", "Steps": f"1. Access {action} interface\n2. Fill mandatory AND optional fields with valid data\n3. Click Submit.", "Expected Result": "System accepts all data fields correctly without truncation."},
+        {"Type": "Positive", "Scenario": f"Verify UI layout and navigation for {action}", "Steps": f"1. Navigate to {action} page\n2. Inspect field labels, alignment, and action buttons.", "Expected Result": "UI components display properly according to design guidelines."},
+        {"Type": "Negative", "Scenario": f"Attempt {action} with all mandatory fields blank", "Steps": f"1. Navigate to {action} interface\n2. Leave required fields empty\n3. Click Submit.", "Expected Result": "Form submission is blocked; inline validation messages appear."},
+        {"Type": "Negative", "Scenario": f"Attempt {action} with invalid input format / special characters", "Steps": f"1. Enter unexpected characters (e.g., <script>, sql injection strings) into {action} fields\n2. Submit.", "Expected Result": "Input sanitization triggers; system throws error without crashing."},
+        {"Type": "Negative", "Scenario": f"Attempt {action} with expired or invalid session token", "Steps": f"1. Open {action} interface\n2. Clear session cookies / let session expire\n3. Click Submit.", "Expected Result": "System redirects to Login screen with 'Session Expired' notification."},
+        {"Type": "Negative", "Scenario": f"Unauthorized execution of {action} (RBAC Check)", "Steps": f"1. Log in with an unprivileged role\n2. Attempt to trigger {action} directly via URL or API.", "Expected Result": "Access denied with HTTP 403 Forbidden status."},
+        {"Type": "Edge Case", "Scenario": f"Execute {action} with boundary limit input size (Max Length)", "Steps": f"1. Enter maximum allowed string length (e.g., 255+ chars) into {action} input fields\n2. Submit.", "Expected Result": "System truncates or validates input within character limits safely."},
+        {"Type": "Edge Case", "Scenario": f"Execute {action} during sudden network disconnect / high latency", "Steps": f"1. Initiate {action}\n2. Simulate network disconnect before server responds.", "Expected Result": "System handles timeout gracefully without duplicating records or corrupting database."},
+        {"Type": "Edge Case", "Scenario": f"Rapid multi-click / double submission during {action}", "Steps": f"1. Enter valid inputs for {action}\n2. Click the Submit button rapidly multiple times.", "Expected Result": "Submit button disables on first click; request is processed only once."},
+        {"Type": "Edge Case", "Scenario": f"Execute {action} concurrently across multiple tabs", "Steps": f"1. Open {action} page in two browser tabs simultaneously\n2. Submit conflicting data from both tabs.", "Expected Result": "Concurrency checks prevent race conditions or data overwrite errors."}
+    ]
+
+    scenarios = []
+    for item in raw_scenarios:
+        item["Priority"] = prioritize_scenario(item["Type"], item["Scenario"], overall_story_priority)
+        scenarios.append(item)
+
+    priority_order = {"High": 1, "Medium": 2, "Low": 3}
+    scenarios.sort(key=lambda x: priority_order.get(x["Priority"], 2))
+    return scenarios
+
+
+# =============================================================
+# ADD PART 3 RIGHT HERE: SIDEBAR UI & AUTHENTICATION HANDLER
+# =============================================================
+st.sidebar.title("🔐 User Authentication")
+
+def reset_input_fields():
+    st.session_state.project_name_input = ""
+    st.session_state.test_plan_name_input = ""
+    st.session_state.user_story_input = ""
+
+if not st.session_state.authenticated:
+    st.sidebar.subheader("QA Engineer Login")
+    login_user = st.sidebar.text_input("Username", value="", placeholder="e.g., qalead")
+    login_pass = st.sidebar.text_input("Password", type="password", value="", placeholder="••••••••")
+    
+    if st.sidebar.button("Login", type="primary"):
+        if login_user in USER_DB and USER_DB[login_user] == login_pass:
+            st.session_state.authenticated = True
+            st.session_state.username = login_user
+            st.session_state.guest_results = None
+            reset_input_fields()  # Clears text areas upon login
+            st.sidebar.success(f"Logged in as {login_user}")
+            st.rerun()
+        else:
+            st.sidebar.error("Invalid Username or Password")
+            
+    st.sidebar.info("💡 **Guest Mode:** Generating without login will clear test cases on page reload.")
+else:
+    st.sidebar.success(f"Logged in as: **{st.session_state.username}**")
+    if st.sidebar.button("Logout"):
+        st.session_state.authenticated = False
+        st.session_state.username = None
+        st.session_state.guest_results = None
+        reset_input_fields()  # Clears text areas upon logout
+        st.rerun()
 # -------------------------------------------------------------
 # SCENARIO-LEVEL DYNAMIC PRIORITIZATION LOGIC
 # -------------------------------------------------------------
@@ -219,7 +324,7 @@ else:
         st.rerun()
 
 # --- UI LAYOUT ---
-st.title("🧪 AI Test Case Generation & Prioritization System")
+st.title("AI Test Case Generation & Prioritization System")
 
 col1, col2 = st.columns(2)
 with col1:
