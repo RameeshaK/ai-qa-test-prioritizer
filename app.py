@@ -16,7 +16,7 @@ st.set_page_config(
 # USER AUTHENTICATION & PERSISTENCE SETUP
 # -------------------------------------------------------------
 USER_DB = {
-    "qa_lead": "password123",
+    "qalead": "lead2026",
     "tester1": "qa2026"
 }
 
