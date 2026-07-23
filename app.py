@@ -284,7 +284,7 @@ if active_data:
 
     st.divider()
 
-    # -------------------------------------------------------------
+   # -------------------------------------------------------------
     # 1. SCENARIO PRIORITY SUMMARY (Guarded against KeyError)
     # -------------------------------------------------------------
     st.subheader("📌 Scenario Priority Summary")
@@ -301,6 +301,7 @@ if active_data:
     df_summary = df_results[['Type', 'Scenario', 'Priority']].copy()
     df_summary['Priority Badge'] = df_summary['Priority'].apply(format_priority)
 
+    # Render Summary Table
     st.dataframe(
         df_summary[['Type', 'Scenario', 'Priority Badge']],
         use_container_width=True,
@@ -312,6 +313,15 @@ if active_data:
         }
     )
 
+    # Download Button for Priority Summary Table
+    csv_summary_data = df_summary[['Type', 'Scenario', 'Priority']].to_csv(index=False).encode('utf-8')
+    st.download_button(
+        label="📥 Download Priority Summary (CSV)",
+        data=csv_summary_data,
+        file_name=f"{active_data['project_name']}_priority_summary.csv",
+        mime="text/csv",
+        key="download_priority_summary"
+    )
     # -------------------------------------------------------------
     # 2. SELECTABLE SCENARIO DETAILED VIEW
     # -------------------------------------------------------------
