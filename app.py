@@ -342,7 +342,7 @@ if active_data:
     # 3. COMPLETE TEST SUITE TABBED MATRIX
     # -------------------------------------------------------------
     st.divider()
-    st.subheader(f"Generated Test Scenarios & Cases ({len(df_results)} Total)")
+    st.subheader(f"Generated Test Scenarios & Cases")
 
     tab_all, tab_pos, tab_neg, tab_edge = st.tabs(["All Cases", "Positive", "Negative", "Edge Cases"])
     
