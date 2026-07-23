@@ -383,12 +383,29 @@ if st.session_state.authenticated:
     
     if saved_tasks:
         for idx, task in enumerate(reversed(saved_tasks)):
-            with st.expander(f"📁 {task['project_name']} — {task['test_plan_name']} (Base Priority: {task['predicted_priority']})"):
-                st.write(f"**User Story:** {task['user_story']}")
-                df_hist = pd.DataFrame(task['scenarios'])
-                if 'Priority' not in df_hist.columns:
-                    df_hist['Priority'] = task.get("predicted_priority", "Medium")
-                df_hist['Test Plan'] = task['test_plan_name']
-                st.dataframe(df_hist, use_container_width=True)
+            # Prepare DataFrame & CSV export for this historical item
+            df_hist = pd.DataFrame(task['scenarios'])
+            if 'Priority' not in df_hist.columns:
+                df_hist['Priority'] = task.get("predicted_priority", "Medium")
+            df_hist['Test Plan'] = task['test_plan_name']
+            
+            csv_hist_data = df_hist.to_csv(index=False).encode('utf-8')
+            
+            # 2-Column Layout: Left for Expander, Right for Download Button
+            col_expander, col_download = st.columns([4, 1])
+            
+            with col_expander:
+                with st.expander(f"📁 {task['project_name']} — {task['test_plan_name']} (Base Priority: {task['predicted_priority']})"):
+                    st.write(f"**User Story:** {task['user_story']}")
+                    st.dataframe(df_hist, use_container_width=True)
+            
+            with col_download:
+                st.download_button(
+                    label="📥 Download CSV",
+                    data=csv_hist_data,
+                    file_name=f"{task['project_name']}_{task['test_plan_name']}_history.csv",
+                    mime="text/csv",
+                    key=f"download_history_{idx}"  # Unique key for each loop iteration
+                )
     else:
         st.info("No saved tasks found. Generate a test plan above to save it to your history.")
